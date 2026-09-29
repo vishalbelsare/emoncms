@@ -25,77 +25,76 @@ class Eventp_ProcessList
     }
 
     // / Below are functions of this module processlist, same name must exist on process_list()
-    
+
     public function process_list() {
 
         textdomain("eventp_messages");
-          
-        $list = array(
+
+        return array(
             array(
-              "name"=>_("If rate >=, skip next"),
+              "name"=>tr("If rate >=, skip next"),
               "short"=>"?rate>=",
               "argtype"=>ProcessArg::VALUE,
               "function"=>"ifRateGtEqualSkip",
-              "datafields"=>0,
-              "unit"=>"",
-              "group"=>_("Conditional - Event"),
+              "group"=>tr("Conditional - Event"),
               "requireredis"=>true,
               "nochange"=>true,
-              "description"=>_("<p>If value from last process has an absolute change from previous time it was calculated higher or equal to the specified value, processlist execution will skip the next process.</p>")
+              "input_context" => true,
+              "virtual_feed_context" => true,
+              "description"=>tr("<p>If value from last process has an absolute change from previous time it was calculated higher or equal to the specified value, processlist execution will skip the next process.</p>")
            ),
            array(
-              "name"=>_("If rate <, skip next"),
+              "name"=>tr("If rate <, skip next"),
               "short"=>"?rate<",
               "argtype"=>ProcessArg::VALUE,
               "function"=>"ifRateLtSkip",
-              "datafields"=>0,
-              "unit"=>"",
-              "group"=>_("Conditional - Event"),
+              "group"=>tr("Conditional - Event"),
               "requireredis"=>true,
               "nochange"=>true,
-              "description"=>_("<p>If value from last process has an absolute change from previous time it was calculated lower than the specified value, processlist execution will skip the next process.</p>")
+              "input_context" => true,
+              "virtual_feed_context" => true,     
+              "description"=>tr("<p>If value from last process has an absolute change from previous time it was calculated lower than the specified value, processlist execution will skip the next process.</p>")
            ),
            array(
-              "name"=>_("If Mute, skip next"),
+              "name"=>tr("If Mute, skip next"),
               "short"=>"?mute",
               "argtype"=>ProcessArg::VALUE,
               "function"=>"ifMuteSkip",
-              "datafields"=>0,
-              "unit"=>"",
-              "group"=>_("Conditional - Event"),
+              "group"=>tr("Conditional - Event"),
               "requireredis"=>true,
               "nochange"=>true,
-              "description"=>_("<p>A time elapsed dependent condition, first time a processlist passes here the flow is unchanged. Next times the same processlist passes here, if the specified value time (in seconds) has not elapsed, flow will skip next process.</p>")
+              "input_context" => true,
+              "virtual_feed_context" => true,    
+              "description"=>tr("<p>A time elapsed dependent condition, first time a processlist passes here the flow is unchanged. Next times the same processlist passes here, if the specified value time (in seconds) has not elapsed, flow will skip next process.</p>")
            ),
            array(
-              "name"=>_("If !Mute, skip next"),
+              "name"=>tr("If !Mute, skip next"),
               "short"=>"?!mute",
               "argtype"=>ProcessArg::VALUE,
               "function"=>"ifNotMuteSkip",
-              "datafields"=>0,
-              "unit"=>"",
-              "group"=>_("Conditional - Event"),
+              "group"=>tr("Conditional - Event"),
               "requireredis"=>true,
               "nochange"=>true,
-              "description"=>_("<p>A time elapsed dependent condition, first time a processlist passes here the flow skips next. Next times the same processlist passes here, if the specified value time (in seconds) has elapsed, flow will skip next process.</p>")
+              "input_context" => true,
+              "virtual_feed_context" => true,    
+              "description"=>tr("<p>A time elapsed dependent condition, first time a processlist passes here the flow skips next. Next times the same processlist passes here, if the specified value time (in seconds) has elapsed, flow will skip next process.</p>")
            ),
            array(
-              "name"=>_("Send Email"),
+              "name"=>tr("Send Email"),
               "short"=>"email",
               "argtype"=>ProcessArg::TEXT,
               "function"=>"sendEmail",
-              "datafields"=>0,
-              "unit"=>"",
-              "group"=>_("Event"),
+              "group"=>tr("Event"),
               "nochange"=>true,
-              "description"=>_("<p>Send an email to the user with the specified body. Email sent to user's email address or default set in config.</p><p>Supported template tags to customize body: {type}, {id}, {key}, {name}, {node}, {time}, {value}</p><p>Example body text: At {time} your {type} from {node} with key {key} named {name} had value {value}.</p>")
+              "input_context" => true,
+              "virtual_feed_context" => false,
+              "description"=>tr("<p>Send an email to the user with the specified body. Email sent to user's email address or default set in settings.ini.</p><p>Supported template tags to customize body: {type}, {id}, {key}, {name}, {node}, {time}, {value}</p><p>Example body text: At {time} your {type} from {node} with key {key} named {name} had value {value}.</p>")
            )
-        ); 
-        return $list;
+        );
     }
-    
+
     public function sendEmail($emailbody, $time, $value, $options) {
-        global $user, $session, $settings;
+        global $user, $session;
 
         $timeformated = DateTime::createFromFormat("U", (int)$time);
         if(!empty($this->parentProcessModel->timezone)) $timeformated->setTimezone(new DateTimeZone($this->parentProcessModel->timezone));
@@ -110,16 +109,17 @@ class Eventp_ProcessList
             $tag = array("{key}","{name}","{node}");
             $replace = array($inputdetails['name'], $inputdetails['description'], $inputdetails['nodeid']);
             $emailbody = str_replace($tag, $replace, $emailbody);
-        } else if ($options['sourcetype'] == "VIRTUALFEED") {
-            // Not suported for VIRTUAL FEEDS
+        } elseif ($options['sourcetype'] == "VIRTUALFEED") {
+            // Not supported for VIRTUAL FEEDS
         }
 
-        //need to get an email address from the config file or the form ?
-        $emailto = $settings['smtp']['default_emailto'];
+        require_once "Lib/email.php";
+        $email = new Email();
 
-        if (!empty($emailto)) { 
-            require_once "Lib/email.php";
-            $email = new Email();
+        //need to get an email address from the config file or the form ?
+        $emailto = $email->default_to();
+
+        if (!empty($emailto)) {
             //$email->from(from);
             $email->to($emailto);
             $email->subject('Emoncms event alert');
@@ -134,7 +134,7 @@ class Eventp_ProcessList
             $this->log->error("No email address specified");
         }
     }
-    
+
     public function ifMuteSkip($ttl, $time, $value, $options)
     {
         global $redis;
@@ -167,7 +167,7 @@ class Eventp_ProcessList
         }
         return $value;
     }
-    
+
     public function ifRateGtEqualSkip($arg, $time, $value, $options)
     {
         global $redis;
@@ -184,7 +184,7 @@ class Eventp_ProcessList
         }
         return $value;
     }
-    
+
     public function ifRateLtSkip($arg, $time, $value, $options)
     {
         global $redis;

@@ -7,20 +7,40 @@
         "forum": "https://community.openenergymonitor.org/"
     },
     "require-dev": {
-        "php-parallel-lint/php-parallel-lint": "^1.2.0"
+        "php-parallel-lint/php-parallel-lint": "^1.2.0",
+        "squizlabs/php_codesniffer": "3.13.6",
+        "phpunit/phpunit": "^10.0"
     },
     "scripts": {
+        "fix": "phpcbf -p .",
+        "lint": "parallel-lint . --exclude vendor",
+        "phpcs": "phpcs -p -s --ignore=*/vendor/* --ignore=*/Lib/* .",
         "test": [
-            "parallel-lint . --exclude vendor"
+            "composer lint",
+            "composer phpcs"
+        ],
+        "phpunit": "phpunit --configuration tests/phpunit.xml",
+        "phpunit-integration": "phpunit --configuration tests/phpunit.integration.xml",
+        "phpunit-feature": "phpunit --configuration tests/phpunit.feature.xml",
+        "phpunit-all": [
+            "@phpunit",
+            "@phpunit-integration",
+            "@phpunit-feature"
         ]
     },
     "license": "AGPL-3.0-or-later",
     "require": {
-        "ext-mysqli": "*",
+        "ext-ctype": "*",
+        "ext-curl": "*",
         "ext-gettext": "*",
         "ext-json": "*",
-        "ext-curl": "*",
+        "ext-mbstring": "*",
+        "ext-mysqli": "*",
         "ext-openssl": "*",
-        "ext-ctype": "*"
+        "ext-zlib": "*"
+    },
+    "suggest": {
+        "ext-mosquitto-php": "Mosquitto MQTT",
+        "ext-redis": "Redis storage engine"
     }
 }

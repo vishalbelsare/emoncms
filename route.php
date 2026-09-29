@@ -41,7 +41,7 @@ class Route
      * @var string
      */
     public $query = '';
-    
+
     /**
      * @var string
      */
@@ -58,6 +58,11 @@ class Route
     public $is_ajax = false;
 
     /**
+     * @var bool
+     */
+    public $is_ap = false;
+    
+    /**
      * @param string $q
      * @param string $documentRoot
      * @param string $requestMethod
@@ -67,6 +72,11 @@ class Route
         $this->decode($q, $documentRoot, $requestMethod);
         //this can be faked by the client. not to be trusted.
         $this->is_ajax = !empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) == 'xmlhttprequest';
+        
+        // is this an access point login?
+        if ($_SERVER['SERVER_ADDR']=="192.168.42.1") {
+            $this->is_ap = true;
+        }
     }
 
     /**
@@ -76,10 +86,10 @@ class Route
      */
     public function decode($q, $documentRoot, $requestMethod)
     {
-        if(is_null($q)){
-			$q="";
-		}
-		// filter out the applications relative root
+        if (is_null($q)) {
+            $q="";
+        }
+        // filter out the applications relative root
 
         // If we're running in a subdirectory "emoncms", $q would look like '/emoncms/user/view' instead or just 'user/view'
         // for the example of viewing a users profile. We need to remove the first directory to get the "clean" routing path
@@ -93,9 +103,9 @@ class Route
         // for example this will perform the following:
         // Running at root: str_replace('/var/www', '', '/var/www') => ''
         // Running at subdirectory: str_replace('/var/www', '', '/var/www/emoncms') => '/emoncms'
-		if (!is_null($documentRoot)) {
-        $relativeApplicationPath = str_replace($documentRoot, '', $absolutePath);
-		}
+        if (!is_null($documentRoot)) {
+            $relativeApplicationPath = str_replace($documentRoot, '', $absolutePath);
+        }
 
         // Next up we will need to remove the '/emoncms' from the route path '/emoncms/user/view'
         // str_replace('/emoncms', '', '/emoncms/user/view') => '/user/view'
@@ -114,7 +124,7 @@ class Route
         $args = preg_split('/[\/]/', $q);
 
         // get format (part of last argument after . i.e view.json)
-        $lastArgIndex = sizeof($args) - 1;
+        $lastArgIndex = count($args) - 1;
         $lastArgSplit = preg_split('/[.]/', $args[$lastArgIndex]);
         if (count($lastArgSplit) > 1) {
             $this->format = $lastArgSplit[1];
@@ -134,16 +144,18 @@ class Route
             $this->subaction2 = $args[3];
         }
         $this->query = parse_url($_SERVER['REQUEST_URI'], PHP_URL_QUERY);
-        
-        // allow for method to be added as post variable
-        if (post('_method')=='DELETE') {
-            $this->method = 'DELETE';
-        } elseif (post('_method')=='PUT') {
-            $this->method = 'PUT';
-        } elseif (in_array($requestMethod, array('POST', 'DELETE', 'PUT'))) {
+
+        // whitelist HTTP methods, default to GET
+        if (in_array($requestMethod, array('POST', 'DELETE', 'PUT'))) {
             $this->method = $requestMethod;
+
         } elseif ($requestMethod === 'OPTIONS') {
             // "CORS PREFLIGHT REQUESTS" EXPECT THESE HEADERS. no content required
+            // Note: Allow-Methods is currently GET-only, but authenticated write calls via
+            // apikey in the URL (/input/post?apikey=xxx) are "simple" POST requests that
+            // bypass CORS preflight entirely, so this restriction is not a full control.
+            // Consider adding POST here to make the policy consistent with actual capability:
+            //   header('Access-Control-Allow-Methods: GET, POST');
             header('Access-Control-Allow-Origin: *');
             header('Access-Control-Allow-Headers: Authorization');
             header('Access-Control-Allow-Methods: GET');

@@ -27,6 +27,15 @@ defined('EMONCMS_EXEC') or die('Restricted access');
 //
 
 
+// Normalize int types for comparison (treats int, int(11), int(4) as "int")
+function normalize_type($type) {
+    $type = strtolower($type);
+    if (strpos($type, 'int') === 0) {
+        return 'int';
+    }
+    return $type;
+}
+
 //
 // Takes a field specification and the result of a DESCRIBE query
 // and works out if the field needs to be altered
@@ -48,8 +57,8 @@ function db_schema_diff_datatype($spec, $current)
     if ($spec_default != $current['Default']) {
         $changed = true;
     }
-    // check if field Type changed
-    if ($spec['type'] !== $current['Type']) {
+    // Use normalized types for comparison
+    if (normalize_type($spec['type']) !== normalize_type($current['Type'])) {
         $changed = true;
     }
     // Null handling is a little involved
@@ -83,11 +92,7 @@ function db_schema_diff_key($spec, $current)
 {
     // 'key' is a flag for primary key
     $spec_primarykey = isset($spec['Key']) ? $spec['Key'] : false;
-    if ($spec_primarykey && $current['Key'] != "PRI") {
-        return true;
-    } else {
-        return false;
-    }
+    return $spec_primarykey && $current['Key'] != "PRI";
 }
 
 //
@@ -151,13 +156,13 @@ function db_schema_make_compound_key($schema)
     $fields = array();
     foreach ($schema as $field => $spec) {
         if (isset($spec['Key']) && $spec['Key']) {
-            array_push($fields, "`$field`");
+            $fields[] = "`$field`";
         }
     }
     if (count($fields) < 2) {
         return "";
     }
-    $fields = join(",", $fields);
+    $fields = implode(",", $fields);
     return ", PRIMARY KEY ($fields)";
 }
 
@@ -177,7 +182,7 @@ function db_schema_make_table($mysqli, $table, $schema, &$operations)
         }
     }
 
-    $operations[] = "CREATE TABLE `$table` (" .join(', ', $fields). $pk . ") ENGINE=MYISAM";
+    $operations[] = "CREATE TABLE `$table` (" .implode(', ', $fields). $pk . ") ENGINE=MYISAM";
 
     foreach ($indexes as $field) {
         $operations[] = db_schema_make_index($table, $field);
@@ -248,7 +253,7 @@ function db_schema_setup($mysqli, $schema, $apply)
 
         // If table doesn't exist, create it
         if ($result == null || $result->num_rows == 0) {
-            db_schema_make_table($mysqli, $table, $schema[$table], $operations);
+            db_schema_make_table($mysqli, $table, $fields, $operations);
         } else {
             // Check each field in the schema
             foreach ($fields as $field => $spec) {

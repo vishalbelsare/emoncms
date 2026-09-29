@@ -34,26 +34,75 @@ var feed = {
         return result;
     },
 
-    list: function()
+    // Returns a list of feeds
+    // If callback is provided, it will be called with the feeds data
+    // If no callback is provided, it will return the feeds data synchronously
+    list: function(callback=null)
     {   
         var feeds = null;
         $.ajax({                                      
             url: path+this.public_username_str()+"feed/list.json"+this.apikeystr(),
             dataType: 'json',
             cache: false,
-            async: false,                      
+            async: (typeof callback === "function"),                      
             success: function(result) {
                 feeds = result; 
                 if (!result || result===null || result==="" || result.constructor!=Array) {
                     console.log("ERROR","feed.list invalid response: "+result);
                     feeds = null;
                 }
-            } 
+
+                if (typeof callback === "function") {
+                    callback(feeds);
+                }
+            }
         });
         
         return feeds;
     },
+
+    // Returns an object with feeds grouped by tag
+    by_tag: function(feeds) {
+        if (!Array.isArray(feeds) || feeds.length === 0) return {};
+        const bytag = {};
+        for (const feed of feeds) {
+            if (!feed || !feed.tag) continue;
+            if (bytag[feed.tag]) {
+                bytag[feed.tag].push(feed);
+            } else {
+                bytag[feed.tag] = [feed];
+            }
+        }
+        return bytag;
+    },
     
+    // Returns an associative array bytagname[tag][name] = id
+    by_tag_and_name: function(feeds) {
+        if (!Array.isArray(feeds) || feeds.length === 0) return {};
+        const bytagname = {};
+        for (const feed of feeds) {
+            if (!feed || !feed.tag) continue;
+            
+            if (bytagname[feed.tag]===undefined) {
+                bytagname[feed.tag] = {};
+            }
+            bytagname[feed.tag][feed.name] = feed;
+        }
+        return bytagname;
+    },
+    
+    // Returns an object with feeds grouped by group
+    by_id: function(feeds) {
+        if (!Array.isArray(feeds) || feeds.length === 0) return {};
+        const byid = {};
+        for (const feed of feeds) {
+            if (!feed || feed.id == null) continue;
+            byid[String(feed.id)] = feed;
+        }
+        return byid;
+    },
+    
+    // Alternative method to get feeds by ID (backward compatibility)
     listbyid: function() {
         var feeds = feed.list();
         if (feeds === null) { return null; }
@@ -62,6 +111,7 @@ var feed = {
         return byid;
     },
 
+    // Asynchronous version of listbyid (backward compatibility)
     listbyidasync: function(f)
     {   
         var feeds = null;
@@ -118,18 +168,48 @@ var feed = {
         return response;
     },
 
-    getvalue: function(feedid,time) {
+    getvalue: function(feedid,time,callback=false,context=false) {
         let data = {
             id: feedid,
             time: time
         }
         if (feed.apikey) data.apikey = feed.apikey;
-        let response = false;
-        $.ajax({ url: path+"feed/value.json", data: data, async: false, success: function(data){ response = data} });
-        return response;
+
+        var async = false;
+        if ( typeof callback === "function" ) {
+            async = true;
+        }
+       
+        var non_async_result = false;
+        var ajaxAsyncXdr = $.ajax({ 
+            url: path+"feed/value.json", 
+            data: data, 
+            async: async, 
+            success: function(result) {
+                if (result===null || result==="") {
+                    console.log("ERROR","feed.getvalue invalid response: "+result);
+                    result = false;
+                } else {
+                    non_async_result = result;
+                }
+                
+                if (async) {
+                    if (!context) {
+                        callback(result);
+                    } else {
+                        callback(context,result);
+                    }
+                }
+            }
+        });
+        if (async) {
+            return ajaxAsyncXdr;
+        } else {
+            return non_async_result;
+        }
     },
 
-    getdata: function(feedid,start,end,interval,average=0,delta=0,skipmissing=0,limitinterval=0,callback=false,context=false,timeformat='unixms'){
+    getdata: function(feedid,start,end,interval,average=0,delta=0,skipmissing=0,limitinterval=0,callback=false,context=false,timeformat='unixms',route='feed/data.json'){
         let data = {
             id: feedid,
             start: start,
@@ -141,6 +221,12 @@ var feed = {
             limitinterval: limitinterval,
             timeformat: timeformat
         };
+        
+        if (typeof feedid === "object") {
+            delete data['id'];
+            data['ids'] = feedid.join(",");
+        }
+        
         if (feed.apikey) data.apikey = feed.apikey;
 
         var async = false;
@@ -148,33 +234,35 @@ var feed = {
             async = true;
         }
 
-        var feed_data = [];        
+        var non_async_result = false;
         var ajaxAsyncXdr = $.ajax({
-            url: path+'feed/data.json',
+            url: path+route,
             data: data,
             dataType: 'json',
             async: async,
             success: function(result) {
                 if (!result || result===null || result==="" || result.constructor!=Array) {
                     console.log("ERROR","feed.getdata invalid response: "+result);
+                } else {
+                    if (timeformat=="notime") {
+                        if (data.ids!=undefined) {
+                            for (var i in result) {
+                                result[i].data = feed.populate_timestamps(result[i].data, start, interval);
+                            }
+                            non_async_result = result;
+                        } else {
+                            non_async_result = feed.populate_timestamps(result, start, interval);
+                        }
+                    } else {
+                        non_async_result = result;
+                    }
                 }
+                
                 if (async) {
                     if (!context) {
                         callback(result);
                     } else {
                         callback(context,result);
-                    }
-                } else {
-                
-                    if (timeformat=="notime") {
-                        var intervalms = interval*1000;
-                        var time = Math.floor(start/intervalms)*intervalms;
-                        for (var z in result) {
-                            feed_data.push([time,result[z]]);
-                            time += intervalms;
-                        }
-                    } else {
-                        feed_data = result;
                     }
                 }
             }
@@ -182,9 +270,11 @@ var feed = {
         if (async) {
             return ajaxAsyncXdr;
         } else {
-            return feed_data;
+            return non_async_result;
         }
     },
+    
+    
     
     getdataDMY_time_of_use: function(id,start,end,interval,split)
     {
@@ -215,8 +305,9 @@ var feed = {
 
     // Virtual feed process
     set_process: function(feedid,processlist){
+        let json_processlist = JSON.stringify(processlist);
         var result = {};
-        $.ajax({ url: path+"feed/process/set.json?id="+feedid, method: "POST", data: "processlist="+processlist, async: false, success: function(data){result = data;} });
+        $.ajax({ url: path+"feed/process/set.json?id="+feedid, method: "POST", data: "processlist="+json_processlist, async: false, success: function(data){result = data;} });
         return result;
     },
 
@@ -263,6 +354,17 @@ var feed = {
             } 
         });
         return meta;
-    }
+    },
+    
+    populate_timestamps: function(values, start, interval) {
+        var intervalms = interval*1000;
+        var time = Math.floor(start/intervalms)*intervalms;
+        var with_time = [];
+        for (var z in values) {
+            with_time.push([time,values[z]]);
+            time += intervalms;
+        }
+        return with_time;
+    } 
 }
 

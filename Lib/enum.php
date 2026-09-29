@@ -30,7 +30,7 @@ class Engine
     const VIRTUALFEED = 7;   // Virtual feed, on demand post processing
     const MYSQLMEMORY = 8;   // Mysql with MEMORY tables on RAM. All data is lost on shutdown
     const REDISBUFFER = 9;   // (internal use only) Redis Read/Write buffer, for low write mode
-    const CASSANDRA = 10;    // Cassandra
+    const CASSANDRA = 10;    // Deprecated
     
     /**
      * returns array of all known engines
@@ -65,8 +65,7 @@ class Engine
             array("id"=>Engine::PHPFINA,"description"=>"Emoncms Fixed Interval TimeSeries"),
             array("id"=>Engine::PHPTIMESERIES,"description"=>"Emoncms Variable Interval TimeSeries"),
             array("id"=>Engine::MYSQL,"description"=>"MYSQL TimeSeries"),
-            array("id"=>Engine::MYSQLMEMORY,"description"=>"MYSQL Memory (RAM data lost on power off)"),
-            array("id"=>Engine::CASSANDRA,"description"=>"CASSANDRA TimeSeries")
+            array("id"=>Engine::MYSQLMEMORY,"description"=>"MYSQL Memory (RAM data lost on power off)")
         );
     }
 
@@ -77,7 +76,10 @@ class Engine
      */ 
     public static function available_intervals() 
     {
-        return array(
+        
+        $intervals = array(
+            array("interval"=>1, "description"=>"1s"),
+            array("interval"=>5, "description"=>"5s"),
             array("interval"=>10, "description"=>"10s"),
             array("interval"=>15, "description"=>"15s"),
             array("interval"=>20, "description"=>"20s"),
@@ -99,6 +101,22 @@ class Engine
             array("interval"=>43200, "description"=>"12h"),
             array("interval"=>86400, "description"=>"1d")
         );
+        
+        global $settings;
+        
+        $min_feed_interval = 10;
+        if (isset($settings['feed']['min_feed_interval'])) {
+             $min_feed_interval = (int) $settings['feed']['min_feed_interval'];
+        }
+        
+        $intervals_out = array();
+        foreach ($intervals as $row) {
+            if ($row['interval']>=$min_feed_interval) {
+                $intervals_out[] = $row;
+            }
+        }
+    
+        return $intervals_out;
     }
      
      

@@ -2,18 +2,19 @@ var user_data = user.get();
 var last_username = ""+user_data.username
 var last_email = ""+user_data.email
 var last_language = ""+user_data.language;
+var last_gravatar = ""+user_data.gravatar;
 
 var timezones = [];
 $.ajax({ url: path+"user/gettimezones.json", dataType: 'json', async: true, success: function(result) {
     app.timezones = result;
 }});
 
-var app = new Vue({
-    el: '#app',
-    data: {
+var app = Vue.createApp({
+    data() { return {
         user: user_data,
         timezones: timezones,
         languages: languages,
+        translation_status: translation_status,
         edit: {
             username: false,
             email: false,
@@ -29,6 +30,16 @@ var app = new Vue({
             current: "",
             new: "",
             repeat: ""
+        },
+        email_password: "",
+        gravatarHash: gravatar_hash
+    }; },
+    computed: {
+        gravatarUrl: function() {
+            // avatars are served via the local proxy rather than gravatar.com directly,
+            // and the proxy is only available where its cache directory exists
+            if (!gravatar_enabled || !this.gravatarHash) return '';
+            return path + 'user/gravatar?hash=' + this.gravatarHash + '&s=80';
         }
     },
     methods: {
@@ -38,8 +49,13 @@ var app = new Vue({
         save: function(key) {
             user.set(app.user);
             app.edit[key] = false;
-            // refresh the page if the language has been changed.
-            if (app.user.language!=last_language) {
+            // Reload after a language change so the new translation applies, and
+            // after a gravatar change because the avatar hash is rendered server
+            // side, see gravatar_hash in profile.php. Only the server knows what
+            // was actually stored: set() strips characters an address may
+            // legitimately contain, so hashing what was typed here would ask the
+            // proxy for an address the account does not have.
+            if (app.user.language!=last_language || app.user.gravatar!=last_gravatar) {
                 window.location.href = path+"user/view";
             }
         },
@@ -66,15 +82,22 @@ var app = new Vue({
         },
         save_email: function(email) {
             if (email!=last_email) {
+                // The current password is required, see change_email
+                if (app.email_password=='') {
+                    alert("Current password field empty");
+                    return false;
+                }
                 $.ajax({
+                    type: 'POST',
                     url: path+"user/changeemail.json",
-                    data: "&email="+encodeURIComponent(email),
+                    data: "email="+encodeURIComponent(email)+"&password="+encodeURIComponent(app.email_password),
                     dataType: 'json',
                     success: function(result) {
                         if (result.success!=undefined) {
                             if (result.success) {
                                 last_email = email;
                                 app.edit.email = false;
+                                app.email_password = "";
                             } else {
                                 alert(result.message)                        
                             }
@@ -83,6 +106,7 @@ var app = new Vue({
                 });
             } else {
                 app.edit.email = false;
+                app.email_password = "";
             }
         },
         change_password: function() {
@@ -130,7 +154,7 @@ var app = new Vue({
             $('#modalNewApikey').modal('show');
         }
     }
-});
+}).mount('#app');
 
 //QR COde Generation
 var urlCleaned = window.location.href.replace("user/view" ,"");
@@ -168,8 +192,10 @@ $("#logoutdelete").click(function() {
 $("#confirm_generate_apikey").click(function() {
     var type = $("#apikey_type").html();
     $.ajax({ url: path+"user/newapikey"+type+".json", dataType: 'json', success: function(result){
-        app.user['apikey_'+type] = result;
-        $('#modalNewApikey').modal('hide');
+        if (result.success) {
+            app.user['apikey_'+type] = result[type+'_apikey'];
+            $('#modalNewApikey').modal('hide');
+        }
     }});
 });
 
@@ -189,6 +215,14 @@ $(".sidebarcolor").click(function() {
     $("html").removeClass('sidebar-'+current_themesidebar).addClass('sidebar-'+themesidebar);
     localStorage.setItem('themesidebar', themesidebar);
     $(".sidebarcolor[name='"+current_themesidebar+"']").removeClass("color-box-active"); 
-    $(".sidebarcolor[name='"+themesidebar+"']").addClass("color-box-active"); 
+    $(".sidebarcolor[name='"+themesidebar+"']").addClass("color-box-active");
     current_themesidebar = themesidebar
+});
+
+// Archived features toggle, used in conjunction with code in Theme/menu/menu.js
+$("#show-archived").prop("checked", localStorage.getItem('show_archived') === 'true');
+$("#show-archived").change(function() {
+    localStorage.setItem('show_archived', this.checked ? 'true' : 'false');
+    // Reload page
+    window.location.reload();
 });

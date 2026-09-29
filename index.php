@@ -20,6 +20,13 @@ require "route.php";
 require "param.php";
 require "locale.php";
 
+// Refuse a second q before anything routes on it, see route_query_is_ambiguous.
+if (route_query_is_ambiguous(isset($_SERVER['QUERY_STRING']) ? $_SERVER['QUERY_STRING'] : '')) {
+    http_response_code(400);
+    echo "Bad request";
+    die;
+}
+
 $emoncms_version = ($settings['feed']['redisbuffer']['enabled'] ? "low-write " : "") . version();
 
 $path = get_application_path($settings["domain"]);
@@ -70,7 +77,7 @@ if (!extension_loaded('gettext')) {
     echo "Your PHP installation appears to be missing the <b>gettext</b> extension which is required by Emoncms. <br> See <a href='". $path. "php-info.php'>PHP Info</a> (restricted to local access)";
     die;
 }
-    
+
 $mysqli = @new mysqli(
     $settings["sql"]["server"],
     $settings["sql"]["username"],
@@ -115,7 +122,7 @@ if (isset($_GET['apikey'])) {
     //      GET /resource HTTP/1.1
     //      Host: server.example.com
     //      Authorization: Bearer THE_API_KEY_HERE
-    
+
     if (isset($_SERVER["CONTENT_TYPE"]) && ($_SERVER["CONTENT_TYPE"]=="aes128cbc" || $_SERVER["CONTENT_TYPE"]=="aes128cbcgz")) {
         // If content_type is AES128CBC
     } else {
@@ -166,6 +173,14 @@ $param = new Param($route, $user);
 // --------------------------------------------------------------------------------------
 // Special routes
 
+// Captive portal (android working, no luck on iOS yet)
+if ($route->controller=="generate_204" || $route->controller=="hotspot-detect") {
+    header('Location: http://192.168.42.1');
+    exit;
+}
+// if (get('q')=="library/test/success.html") { header('Location: /'); exit; }
+
+
 // Return brief device descriptor for hub detection
 if ($route->controller=="describe") {
     header('Content-Type: text/plain');
@@ -184,6 +199,15 @@ if ($route->controller=="version") {
     echo version();
     exit;
 }
+// Machine readable API documentation for AI assistants (llms.txt convention):
+// /llms.txt is a short index, /llms-full.txt the complete reference, both
+// generated from the same definitions as the site/api explorer
+if (($route->controller=="llms" || $route->controller=="llms-full") && $route->format=="txt") {
+    require_once "Lib/api_docs_export.php";
+    header('Content-Type: text/plain; charset=utf-8');
+    echo $route->controller=="llms" ? api_docs_llms_txt() : api_docs_markdown();
+    exit;
+}
 
 if (get('embed')==1) {
     $embed = 1;
@@ -197,16 +221,15 @@ if ($route->isRouteNotDefined()) {
     if ($settings["interface"]["enable_admin_ui"]) {
         if (file_exists("Modules/setup")) {
             require "Modules/setup/setup_model.php";
-            $setup = new Setup($mysqli);
-            if ($setup->status()=="unconfigured") {
+            $setup = new Setup($mysqli);   
+            // Either show setup interface if unconfigured or if access point login
+            if ($setup->status()=="unconfigured" || $route->is_ap) {
                 $settings["interface"]["default_controller"] = "setup";
                 $settings["interface"]["default_action"] = "";
-                // Provide special setup access to WIFI module functions
-                $_SESSION['setup_access'] = true;
             }
         }
     }
-    
+
     if (!isset($session['read']) || (isset($session['read']) && !$session['read'])) {
         // Non authenticated defaults
         $route->controller = $settings["interface"]["default_controller"];
@@ -257,16 +280,16 @@ if (!$output['is_controller'] && $settings["public_profile"]["enabled"] && $rout
         $route->subaction = $route->subaction2;
         // Try again
         $output = controller($route->controller);
-        
+
         // If no content, try showing any public dashboards
-        if ($output['content'] === EMPTY_ROUTE) {            
+        if ($output['content'] === EMPTY_ROUTE) {
             $route->subaction = $route->controller;
             $route->controller = "dashboard";
             $route->action = "view";
             $output = controller($route->controller);
         }
         // If no content or dashboards, try showing any public apps
-        if ($output['content'] === EMPTY_ROUTE) {            
+        if ($output['content'] === EMPTY_ROUTE) {
             $route->subaction = $route->controller;
             $route->controller = "app";
             $route->action = "view";
@@ -279,13 +302,13 @@ if (!$output['is_controller'] && $settings["public_profile"]["enabled"] && $rout
 if ($output['content'] === EMPTY_ROUTE) {
     // alter output is $route has $action
     $actions = implode("/", array_filter(array($route->action, $route->subaction)));
-    $message = sprintf(_('%s cannot respond to %s'), sprintf("<strong>%s</strong>", ucfirst($route->controller)), sprintf('<strong>"%s"</strong>', $actions));
+    $message = sprintf(tr('%s cannot respond to %s'), sprintf("<strong>%s</strong>", ucfirst($route->controller)), sprintf('<strong>"%s"</strong>', $actions));
     // alter the http header code
     header($_SERVER["SERVER_PROTOCOL"]." 406 Not Acceptable");
-    $title = _('406 Not Acceptable');
-    $plain_text = _('Route not found');
-    $intro = sprintf('%s %s', _('URI not acceptable.'), $message);
-    $text = _('Try another link from the menu.');
+    $title = tr('406 Not Acceptable');
+    $plain_text = tr('Route not found');
+    $intro = sprintf('%s %s', tr('URI not acceptable.'), $message);
+    $text = tr('Try another link from the menu.');
     // return the formatted string
     if ($route->format==='html') {
         $output['content'] = sprintf('<h2>%s</h2><p class="lead">%s.</p><p>%s</p>', $title, $intro, $text);
@@ -300,11 +323,11 @@ if ($output['content'] === EMPTY_ROUTE) {
 
 // If not authenticated and no ouput, asks for login
 if ($output['content'] === "" && (!isset($session['read']) || (isset($session['read']) && !$session['read']))) {
-    $log->error(sprintf('%s|%s', _('Not Authenticated'), implode('/', array_filter(array($route->controller,$route->action,$route->subaction)))));
+    $log->error(sprintf('%s|%s', tr('Not Authenticated'), implode('/', array_filter(array($route->controller,$route->action,$route->subaction)))));
     $route->controller = "user";
     $route->action = "login";
     $route->subaction = "";
-    $message = urlencode(_('Authentication Required'));
+    $message = urlencode(tr('Authentication Required'));
     $referrer = urlencode(base64_encode(filter_var($_SERVER['REQUEST_URI'], FILTER_SANITIZE_URL)));
     $route->query = sprintf("msg=%s&ref=%s", $message, $referrer);
     $output = controller($route->controller);
@@ -312,6 +335,12 @@ if ($output['content'] === "" && (!isset($session['read']) || (isset($session['r
 
 $output['route'] = $route;
 $output['session'] = $session;
+
+// Clickjacking protection, set once the route is final
+set_frame_policy($route);
+
+// Keep url query parameters, which may carry an apikey, out of the referer
+set_referrer_policy();
 
 // 7) Output
 if ($route->format == 'json') {
@@ -353,14 +382,14 @@ if ($route->format == 'json') {
             }
         }
     }
-} else if ($route->format == 'html') {
+} elseif ($route->format == 'html') {
     if ($embed == 1) {
         print view("Theme/embed.php", $output);
     } else {
         // Menu
         $menu = array();
         // Create initial entry for setup menu
-        $menu["setup"] = array("name"=>"Setup", "order"=>1, "icon"=>"menu", "default"=>"feed/view", "l2"=>array());
+        $menu["setup"] = array("name"=>tr("Setup"), "order"=>1, "icon"=>"menu", "default"=>"feed/view", "l2"=>array());
         if ($session["public_userid"]) {
             $menu["setup"]["name"] = ucfirst($session["public_username"]);
         }
@@ -368,17 +397,15 @@ if ($route->format == 'json') {
         // Itterates through installed modules to load module menus
         load_menu();
         // Pass menu through to output view - passed on the js based builder
-        
+
         // Hide menu if nothing to see
         if (!$menu["setup"]["l2"]) $menu = array();
-        
+
         $output['menu'] = $menu;
-        
-        $output['svg_icons'] = view("Theme/svg_icons.svg", array());
-        
+
         // add css class names to <body> tag based on controller's options
         $output['page_classes'][] = $route->controller;
-        
+
         if (!$session['read']) {
             $output['page_classes'][] = 'collapsed manual';
         } else {
@@ -387,8 +414,11 @@ if ($route->format == 'json') {
         print view("Theme/theme.php", $output);
     }
 
-} elseif ($route->format == 'text') {
+} elseif ($route->format == 'text' || $route->format == 'txt') {
     header('Content-Type: text/plain');
+    print $output['content'];
+} elseif ($route->format == 'md') {
+    header('Content-Type: text/markdown; charset=utf-8');
     print $output['content'];
 } elseif ($route->format == 'csv') {
     header('Content-Type: text/csv');
